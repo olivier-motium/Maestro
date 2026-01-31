@@ -30,7 +30,7 @@ import maestro.cli.mcp.tools.RunWorkflowTool
 import maestro.cli.util.WorkingDirectory
 
 // Main function to run the Maestro MCP server
-fun runMaestroMcpServer() {
+fun runMaestroMcpServer(stdout: java.io.PrintStream = System.out) {
     // Disable all console logging to prevent interference with JSON-RPC communication
     LogConfig.configure(logFileName = null, printToConsole = false)
     
@@ -70,10 +70,10 @@ fun runMaestroMcpServer() {
     ))
 
 
-    // Create a transport using standard IO for server communication
+    // Create a transport using the original stdout (before redirect) for clean JSON-RPC
     val transport = StdioServerTransport(
         System.`in`.asSource().buffered(),
-        System.out.asSink().buffered()
+        stdout.asSink().buffered()
     )
 
     System.err.println("MCP Server: Started. Waiting for messages. Working directory: ${WorkingDirectory.baseDir}")

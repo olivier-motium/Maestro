@@ -37,6 +37,7 @@ import maestro.cli.command.RecordCommand
 import maestro.cli.command.StartDeviceCommand
 import maestro.cli.command.StudioCommand
 import maestro.cli.command.TestCommand
+import java.io.PrintStream
 import maestro.cli.insights.TestAnalysisManager
 import maestro.cli.update.Updates
 import maestro.cli.util.ChangeLogUtils
@@ -109,6 +110,16 @@ private fun printVersion() {
 }
 
 fun main(args: Array<String>) {
+    // MCP stdio transport: stdout is the JSON-RPC data channel.
+    // Redirect System.out → stderr BEFORE anything can write to stdout.
+    // The original stdout is preserved for the MCP transport to use exclusively.
+    val isMcp = args.isNotEmpty() && args[0] == "mcp"
+    if (isMcp) {
+        val originalOut = System.out
+        System.setOut(PrintStream(System.err, true))
+        McpCommand.originalStdout = originalOut
+    }
+
     // Disable icon in Mac dock
     // https://stackoverflow.com/a/17544259
     try {

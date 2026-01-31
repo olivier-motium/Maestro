@@ -1,9 +1,10 @@
 package maestro.cli.command
 
 import picocli.CommandLine
+import java.io.File
+import java.io.PrintStream
 import java.util.concurrent.Callable
 import maestro.cli.mcp.runMaestroMcpServer
-import java.io.File
 import maestro.cli.util.WorkingDirectory
 
 @CommandLine.Command(
@@ -13,6 +14,14 @@ import maestro.cli.util.WorkingDirectory
     ],
 )
 class McpCommand : Callable<Int> {
+    companion object {
+        /** Original System.out saved before stdout redirect in main().
+         *  Used as the MCP transport output so JSON-RPC goes to real stdout
+         *  while all other output (logging, analytics) goes to stderr. */
+        @JvmStatic
+        var originalStdout: PrintStream = System.out
+    }
+
     @CommandLine.Option(
         names = ["--working-dir"],
         description = ["Base working directory for resolving files"]
@@ -23,7 +32,7 @@ class McpCommand : Callable<Int> {
         if (workingDir != null) {
             WorkingDirectory.baseDir = workingDir!!.absoluteFile
         }
-        runMaestroMcpServer()
+        runMaestroMcpServer(originalStdout)
         return 0
     }
 } 
