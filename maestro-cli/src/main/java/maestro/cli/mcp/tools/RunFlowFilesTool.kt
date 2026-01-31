@@ -84,10 +84,9 @@ object RunFlowFilesTool {
                     deviceId = deviceId,
                     platform = null
                 ) { session ->
-                    val orchestra = Orchestra(session.maestro)
                     val results = mutableListOf<Map<String, Any>>()
                     var totalCommands = 0
-                    
+
                     for (fileObj in resolvedFiles) {
                         try {
                             val commands = YamlCommandReader.readCommands(fileObj.toPath())
@@ -95,17 +94,53 @@ object RunFlowFilesTool {
                                 .withInjectedShellEnvVars()
                                 .withDefaultEnvVars(fileObj, deviceId)
                             val commandsWithEnv = commands.withEnv(finalEnv)
-                            
-                            runBlocking {
+
+                            // Step-level tracking per file
+                            var completedCount = 0
+                            var failedStepIndex = -1
+                            var failedCommand = ""
+                            var failedError = ""
+
+                            val orchestra = Orchestra(
+                                session.maestro,
+                                onCommandComplete = { index, _ ->
+                                    completedCount = index + 1
+                                },
+                                onCommandFailed = { index, cmd, error ->
+                                    failedStepIndex = index
+                                    failedCommand = cmd.description()
+                                    failedError = error.message ?: "Unknown error"
+                                    Orchestra.ErrorResolution.FAIL
+                                },
+                                onCommandWarned = { index, _ ->
+                                    completedCount = index + 1
+                                }
+                            )
+
+                            val success = runBlocking {
                                 orchestra.runFlow(commandsWithEnv)
                             }
-                            results.add(mapOf(
-                                "file" to fileObj.absolutePath,
-                                "success" to true,
-                                "commands_executed" to commands.size,
-                                "message" to "Flow executed successfully"
-                            ))
-                            totalCommands += commands.size
+
+                            if (success) {
+                                results.add(mapOf(
+                                    "file" to fileObj.absolutePath,
+                                    "success" to true,
+                                    "commands_executed" to commands.size,
+                                    "message" to "Flow executed successfully"
+                                ))
+                                totalCommands += commands.size
+                            } else {
+                                results.add(mapOf(
+                                    "file" to fileObj.absolutePath,
+                                    "success" to false,
+                                    "total_steps" to commands.size,
+                                    "completed_steps" to completedCount,
+                                    "failed_at_step" to failedStepIndex,
+                                    "failed_command" to failedCommand,
+                                    "error" to failedError,
+                                    "message" to "Flow failed at step $failedStepIndex of ${commands.size}: $failedError"
+                                ))
+                            }
                         } catch (e: Exception) {
                             results.add(mapOf(
                                 "file" to fileObj.absolutePath,

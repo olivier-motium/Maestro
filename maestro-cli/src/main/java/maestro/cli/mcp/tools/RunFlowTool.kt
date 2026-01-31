@@ -102,40 +102,74 @@ object RunFlowTool {
                     val tempFile = Files.createTempFile("maestro-flow", ".yaml").toFile()
                     try {
                         tempFile.writeText(flowYaml)
-                        
+
                         // Parse and execute the flow with environment variables
                         val commands = YamlCommandReader.readCommands(tempFile.toPath())
                         val finalEnv = env
                             .withInjectedShellEnvVars()
                             .withDefaultEnvVars(tempFile, deviceId)
                         val commandsWithEnv = commands.withEnv(finalEnv)
-                        
-                        val orchestra = Orchestra(session.maestro)
-                        
-                        runBlocking {
+
+                        // Step-level tracking
+                        var completedCount = 0
+                        var failedStepIndex = -1
+                        var failedCommand = ""
+                        var failedError = ""
+
+                        val orchestra = Orchestra(
+                            session.maestro,
+                            onCommandComplete = { index, _ ->
+                                completedCount = index + 1
+                            },
+                            onCommandFailed = { index, cmd, error ->
+                                failedStepIndex = index
+                                failedCommand = cmd.description()
+                                failedError = error.message ?: "Unknown error"
+                                Orchestra.ErrorResolution.FAIL
+                            },
+                            onCommandWarned = { index, _ ->
+                                completedCount = index + 1
+                            }
+                        )
+
+                        val success = runBlocking {
                             orchestra.runFlow(commandsWithEnv)
                         }
-                        
-                        buildJsonObject {
-                            put("success", true)
-                            put("device_id", deviceId)
-                            put("commands_executed", commands.size)
-                            put("message", "Flow executed successfully")
-                            if (finalEnv.isNotEmpty()) {
-                                putJsonObject("env_vars") {
-                                    finalEnv.forEach { (key, value) ->
-                                        put(key, value)
+
+                        if (success) {
+                            buildJsonObject {
+                                put("success", true)
+                                put("device_id", deviceId)
+                                put("commands_executed", commands.size)
+                                put("message", "Flow executed successfully")
+                                if (finalEnv.isNotEmpty()) {
+                                    putJsonObject("env_vars") {
+                                        finalEnv.forEach { (key, value) ->
+                                            put(key, value)
+                                        }
                                     }
                                 }
-                            }
-                        }.toString()
+                            }.toString()
+                        } else {
+                            buildJsonObject {
+                                put("success", false)
+                                put("device_id", deviceId)
+                                put("total_steps", commands.size)
+                                put("completed_steps", completedCount)
+                                put("failed_at_step", failedStepIndex)
+                                put("failed_command", failedCommand)
+                                put("error", failedError)
+                                put("message", "Flow failed at step $failedStepIndex of ${commands.size}: $failedError")
+                            }.toString()
+                        }
                     } finally {
                         // Clean up the temporary file
                         tempFile.delete()
                     }
                 }
-                
-                CallToolResult(content = listOf(TextContent(result)))
+
+                val isError = result.contains("\"success\":false")
+                CallToolResult(content = listOf(TextContent(result)), isError = isError)
             } catch (e: Exception) {
                 CallToolResult(
                     content = listOf(TextContent("Failed to run flow: ${e.message}")),
